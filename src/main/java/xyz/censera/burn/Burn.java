@@ -23,7 +23,6 @@ public final class Burn extends JavaPlugin implements Listener {
         getServer().getPluginManager().registerEvents(this, this);
     }
 
-    // Apply stored display name and fix join message.
     @EventHandler(priority = EventPriority.LOWEST)
     public void onJoin(PlayerJoinEvent event) {
         Player player = event.getPlayer();
@@ -35,7 +34,6 @@ public final class Burn extends JavaPlugin implements Listener {
         }
     }
 
-    // Fix quit message to use display name.
     @EventHandler(priority = EventPriority.LOWEST)
     public void onQuit(PlayerQuitEvent event) {
         Player player = event.getPlayer();
@@ -51,13 +49,10 @@ public final class Burn extends JavaPlugin implements Listener {
             @NotNull Command command,
             @NotNull String label,
             @NotNull String[] args) {
-
-        // Silently ignore non-OPs — no feedback, no error.
         if (!sender.isOp()) {
             return true;
         }
 
-        // /burn <username> "<display>" | reset
         if (args.length < 2) {
             sender.sendMessage("§7/burn <player> <display|reset>");
             return true;
@@ -65,8 +60,6 @@ public final class Burn extends JavaPlugin implements Listener {
 
         String targetName = args[0];
         Player target = Bukkit.getPlayerExact(targetName);
-
-        // Resolve UUID: online players directly, offline via cache.
         UUID uuid;
         if (target != null) {
             uuid = target.getUniqueId();
@@ -80,9 +73,8 @@ public final class Burn extends JavaPlugin implements Listener {
             uuid = offline.getUniqueId();
         }
 
-        // Collect remaining args as the display name (handles quoted and unquoted).
         String rest = String.join(" ", List.of(args).subList(1, args.length))
-                           .replaceAll("^\"|\"$", "");
+                .replaceAll("^\"|\"$", "");
 
         if (rest.equalsIgnoreCase("reset")) {
             getConfig().set("names." + uuid, null);
@@ -95,9 +87,7 @@ public final class Burn extends JavaPlugin implements Listener {
             return true;
         }
 
-        // Translate §-codes that come in as literal § characters.
         String display = rest.replace("&", "§");
-
         getConfig().set("names." + uuid, display);
         saveConfig();
 
