@@ -8,6 +8,7 @@ import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerJoinEvent;
+import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.jetbrains.annotations.NotNull;
 
@@ -22,7 +23,7 @@ public final class Burn extends JavaPlugin implements Listener {
         getServer().getPluginManager().registerEvents(this, this);
     }
 
-    // Apply stored display name when a player joins.
+    // Apply stored display name and fix join message.
     @EventHandler(priority = EventPriority.LOWEST)
     public void onJoin(PlayerJoinEvent event) {
         Player player = event.getPlayer();
@@ -30,6 +31,17 @@ public final class Burn extends JavaPlugin implements Listener {
         if (stored != null) {
             player.setDisplayName(stored);
             player.setPlayerListName(stored);
+            event.setJoinMessage(stored + " §ejoined the game.");
+        }
+    }
+
+    // Fix quit message to use display name.
+    @EventHandler(priority = EventPriority.LOWEST)
+    public void onQuit(PlayerQuitEvent event) {
+        Player player = event.getPlayer();
+        String stored = getConfig().getString("names." + player.getUniqueId());
+        if (stored != null) {
+            event.setQuitMessage(stored + " §eleft the game.");
         }
     }
 
@@ -98,7 +110,6 @@ public final class Burn extends JavaPlugin implements Listener {
         return true;
     }
 
-    // Hide command from tab-complete for non-OPs.
     @Override
     public @NotNull List<String> onTabComplete(
             @NotNull CommandSender sender,
