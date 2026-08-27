@@ -1,0 +1,11 @@
+target/
+.idea/
+.classpath
+.project
+.settings/
+.vscode/
+*.iml
+.env
+*.pem
+*.key
+credentials.json
