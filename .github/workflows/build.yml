@@ -14,11 +14,14 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Set up Java 21
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           java-version: "21"
           distribution: temurin
           cache: maven
+
+      - name: Enforce work rules
+        run: bash scripts/enforce.sh
 
       - name: Build
         run: mvn package -q
@@ -41,7 +44,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Set up Java 21
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           java-version: "21"
           distribution: temurin
