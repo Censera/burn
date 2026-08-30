@@ -1,9 +1,11 @@
 name: burn
-version: 1.0.0
+version: 1.4.0
 main: xyz.censera.burn.Burn
 api-version: '1.21'
 description: ' '
 authors: []
+soft-depend:
+  - floodgate
 
 commands:
   burn:

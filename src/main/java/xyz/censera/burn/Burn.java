@@ -18,11 +18,14 @@ import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.scheduler.BukkitTask;
 import org.bukkit.scoreboard.Scoreboard;
 import org.bukkit.scoreboard.Team;
+import org.bukkit.util.Vector;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 public final class Burn extends JavaPlugin implements Listener {
@@ -30,18 +33,30 @@ public final class Burn extends JavaPlugin implements Listener {
     private static final String TEAM_NAME = "burn_hidden";
     private static final String DISPLAY_TAG = "burn_nametag";
 
+    // Tag is shown when the viewer is within this distance (blocks).
+    private static final double SHOW_DISTANCE = 16.0;
+    // Tag is shown when the viewer's look direction is within this angle (degrees).
+    private static final double SHOW_ANGLE = 35.0;
+
     private Scoreboard scoreboard;
     private Team hiddenNameTeam;
+    private boolean floodgatePresent;
 
-    // Tracks the TextDisplay entity for each online player.
+    // Tracks the TextDisplay entity for each online Java player.
     private final Map<UUID, TextDisplay> nameTags = new HashMap<>();
 
-    // Repeating task that teleports each TextDisplay to its player's head.
-    private BukkitTask teleportTask;
+    // Per viewer: which tag owners are currently visible to them.
+    // Used to diff state each tick and call show/hide only on changes.
+    private final Map<UUID, Set<UUID>> visibleTo = new HashMap<>();
+
+    // Repeating task that teleports displays and manages per-viewer visibility.
+    private BukkitTask tickTask;
 
     @Override
     public void onEnable() {
         saveDefaultConfig();
+
+        floodgatePresent = Bukkit.getPluginManager().getPlugin("floodgate") != null;
 
         scoreboard = Bukkit.getScoreboardManager().getMainScoreboard();
         hiddenNameTeam = scoreboard.getTeam(TEAM_NAME);
@@ -53,17 +68,7 @@ public final class Burn extends JavaPlugin implements Listener {
         removeDisplayEntities();
         getServer().getPluginManager().registerEvents(this, this);
 
-        // Teleport each tracked TextDisplay to its player's head every tick.
-        teleportTask = Bukkit.getScheduler().runTaskTimer(this, () -> {
-            for (Map.Entry<UUID, TextDisplay> entry : nameTags.entrySet()) {
-                Player player = Bukkit.getPlayer(entry.getKey());
-                TextDisplay display = entry.getValue();
-                if (player != null && player.isOnline() && display != null && !display.isDead()) {
-                    Location target = player.getLocation().clone().add(0, player.getHeight() + 0.35, 0);
-                    display.teleport(target);
-                }
-            }
-        }, 0L, 1L);
+        tickTask = Bukkit.getScheduler().runTaskTimer(this, this::tick, 0L, 1L);
 
         for (Player player : Bukkit.getOnlinePlayers()) {
             applyStoredName(player);
@@ -72,9 +77,9 @@ public final class Burn extends JavaPlugin implements Listener {
 
     @Override
     public void onDisable() {
-        if (teleportTask != null) {
-            teleportTask.cancel();
-            teleportTask = null;
+        if (tickTask != null) {
+            tickTask.cancel();
+            tickTask = null;
         }
 
         for (Player player : Bukkit.getOnlinePlayers()) {
@@ -89,6 +94,83 @@ public final class Burn extends JavaPlugin implements Listener {
         }
 
         nameTags.clear();
+        visibleTo.clear();
+    }
+
+    // Called every tick. Teleports displays and updates per-viewer show/hide state.
+    private void tick() {
+        // Teleport each display to its owner's head.
+        for (Map.Entry<UUID, TextDisplay> entry : nameTags.entrySet()) {
+            Player owner = Bukkit.getPlayer(entry.getKey());
+            TextDisplay display = entry.getValue();
+            if (owner == null || !owner.isOnline() || display == null || display.isDead()) {
+                continue;
+            }
+            display.teleport(headLocation(owner));
+        }
+
+        // For each online Java viewer, decide which tags they should see.
+        for (Player viewer : Bukkit.getOnlinePlayers()) {
+            if (isBedrock(viewer)) {
+                continue;
+            }
+
+            Set<UUID> currentlyVisible = visibleTo.computeIfAbsent(viewer.getUniqueId(), k -> new HashSet<>());
+
+            for (Map.Entry<UUID, TextDisplay> entry : nameTags.entrySet()) {
+                UUID ownerUuid = entry.getKey();
+                TextDisplay display = entry.getValue();
+
+                // Never show a player their own tag.
+                if (ownerUuid.equals(viewer.getUniqueId())) {
+                    continue;
+                }
+
+                Player owner = Bukkit.getPlayer(ownerUuid);
+                if (owner == null || !owner.isOnline() || display == null || display.isDead()) {
+                    continue;
+                }
+
+                boolean shouldShow = canSeeTag(viewer, owner);
+                boolean isShown = currentlyVisible.contains(ownerUuid);
+
+                if (shouldShow && !isShown) {
+                    viewer.showEntity(this, display);
+                    currentlyVisible.add(ownerUuid);
+                } else if (!shouldShow && isShown) {
+                    viewer.hideEntity(this, display);
+                    currentlyVisible.remove(ownerUuid);
+                }
+            }
+        }
+    }
+
+    // Returns true if viewer is close enough and roughly looking at owner.
+    private boolean canSeeTag(Player viewer, Player owner) {
+        Location vLoc = viewer.getEyeLocation();
+        Location oLoc = owner.getLocation().add(0, owner.getHeight() * 0.5, 0);
+
+        if (!vLoc.getWorld().equals(oLoc.getWorld())) {
+            return false;
+        }
+
+        double distance = vLoc.distance(oLoc);
+        if (distance > SHOW_DISTANCE) {
+            return false;
+        }
+
+        // Direction from viewer eye to the owner's center.
+        Vector toOwner = oLoc.toVector().subtract(vLoc.toVector()).normalize();
+        Vector lookDir = vLoc.getDirection().normalize();
+        double dot = lookDir.dot(toOwner);
+
+        // dot = cos(angle); convert SHOW_ANGLE threshold to cosine for comparison.
+        double threshold = Math.cos(Math.toRadians(SHOW_ANGLE));
+        return dot >= threshold;
+    }
+
+    private Location headLocation(Player player) {
+        return player.getLocation().clone().add(0, player.getHeight() + 0.35, 0);
     }
 
     private void applyStoredName(Player player) {
@@ -99,15 +181,18 @@ public final class Burn extends JavaPlugin implements Listener {
 
         player.setDisplayName(stored);
         player.setPlayerListName(stored);
-        setNameTag(player, stored);
+
+        // Bedrock players can't see TextDisplay entities — display name is enough.
+        if (!isBedrock(player)) {
+            setNameTag(player, stored);
+        }
     }
 
     private void setNameTag(Player player, String display) {
         hiddenNameTeam.addEntry(player.getName());
         removeNameTag(player);
 
-        Location location = player.getLocation().clone().add(0, player.getHeight() + 0.6, 0);
-        TextDisplay text = player.getWorld().spawn(location, TextDisplay.class, entity -> {
+        TextDisplay text = player.getWorld().spawn(headLocation(player), TextDisplay.class, entity -> {
             entity.addScoreboardTag(DISPLAY_TAG);
             entity.text(toComponent(display));
             entity.setBillboard(TextDisplay.Billboard.VERTICAL);
@@ -120,15 +205,15 @@ public final class Burn extends JavaPlugin implements Listener {
             entity.setInterpolationDuration(0);
             entity.setTeleportDuration(0);
             entity.setPersistent(false);
+            // Hidden from everyone by default; tick() handles per-viewer show/hide.
+            entity.setVisibleByDefault(false);
         });
 
         nameTags.put(player.getUniqueId(), text);
-        text.setVisibleByDefault(true);
-        player.hideEntity(this, text);
     }
 
     private void removeNameTag(Player player) {
-        // Remove any leftover passenger-based entities (cleanup from old version).
+        // Clean up any leftover passenger-based entities from older versions.
         for (Entity passenger : player.getPassengers()) {
             if (passenger.getScoreboardTags().contains(DISPLAY_TAG)) {
                 player.removePassenger(passenger);
@@ -136,10 +221,15 @@ public final class Burn extends JavaPlugin implements Listener {
             }
         }
 
-        // Remove the tracked TextDisplay for this player.
         TextDisplay existing = nameTags.remove(player.getUniqueId());
         if (existing != null && !existing.isDead()) {
             existing.remove();
+        }
+
+        // Clear this owner from every viewer's visible set.
+        UUID ownerUuid = player.getUniqueId();
+        for (Set<UUID> visible : visibleTo.values()) {
+            visible.remove(ownerUuid);
         }
     }
 
@@ -151,6 +241,14 @@ public final class Burn extends JavaPlugin implements Listener {
         if (hiddenNameTeam != null) {
             hiddenNameTeam.removeEntry(player.getName());
         }
+    }
+
+    private boolean isBedrock(Player player) {
+        if (!floodgatePresent) {
+            return false;
+        }
+        return org.geysermc.floodgate.api.FloodgateApi.getInstance()
+                .isFloodgatePlayer(player.getUniqueId());
     }
 
     private Component toComponent(String text) {
@@ -172,11 +270,10 @@ public final class Burn extends JavaPlugin implements Listener {
         Player player = event.getPlayer();
         String stored = getConfig().getString("names." + player.getUniqueId());
         if (stored != null) {
-            // Delay by 1 tick — the player isn't fully in the world at join time,
-            // so spawning and tracking a TextDisplay here fails silently.
             Bukkit.getScheduler().runTaskLater(this, () -> applyStoredName(player), 1L);
             event.setJoinMessage(stored + " §ejoined the game.");
         }
+        visibleTo.put(player.getUniqueId(), new HashSet<>());
     }
 
     @EventHandler(priority = EventPriority.LOWEST)
@@ -187,6 +284,7 @@ public final class Burn extends JavaPlugin implements Listener {
             event.setQuitMessage(stored + " §eleft the game.");
         }
         removeNameTag(player);
+        visibleTo.remove(player.getUniqueId());
         if (hiddenNameTeam != null) {
             hiddenNameTeam.removeEntry(player.getName());
         }
