@@ -170,7 +170,7 @@ public final class Burn extends JavaPlugin implements Listener {
     }
 
     private Location headLocation(Player player) {
-        return player.getLocation().clone().add(0, player.getHeight(), 0);
+        return player.getLocation().clone().add(0, player.getHeight() + 0.3, 0);
     }
 
     private void applyStoredName(Player player) {
@@ -195,7 +195,7 @@ public final class Burn extends JavaPlugin implements Listener {
         TextDisplay text = player.getWorld().spawn(headLocation(player), TextDisplay.class, entity -> {
             entity.addScoreboardTag(DISPLAY_TAG);
             entity.text(toComponent(display));
-            entity.setBillboard(TextDisplay.Billboard.VERTICAL);
+            entity.setBillboard(TextDisplay.Billboard.CENTER);
             entity.setAlignment(TextDisplay.TextAlignment.CENTER);
             entity.setBackgroundColor(org.bukkit.Color.fromARGB(64, 0, 0, 0));
             entity.setShadowed(false);

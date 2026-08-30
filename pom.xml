@@ -6,7 +6,7 @@
 
     <groupId>xyz.censera</groupId>
     <artifactId>burn</artifactId>
-    <version>1.4.0</version>
+    <version>1.4.2</version>
     <packaging>jar</packaging>
 
     <properties>
