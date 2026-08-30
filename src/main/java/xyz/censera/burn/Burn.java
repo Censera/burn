@@ -15,11 +15,14 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.plugin.java.JavaPlugin;
+import org.bukkit.scheduler.BukkitTask;
 import org.bukkit.scoreboard.Scoreboard;
 import org.bukkit.scoreboard.Team;
 import org.jetbrains.annotations.NotNull;
 
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 public final class Burn extends JavaPlugin implements Listener {
@@ -29,6 +32,12 @@ public final class Burn extends JavaPlugin implements Listener {
 
     private Scoreboard scoreboard;
     private Team hiddenNameTeam;
+
+    // Tracks the TextDisplay entity for each online player.
+    private final Map<UUID, TextDisplay> nameTags = new HashMap<>();
+
+    // Repeating task that teleports each TextDisplay to its player's head.
+    private BukkitTask teleportTask;
 
     @Override
     public void onEnable() {
@@ -44,6 +53,18 @@ public final class Burn extends JavaPlugin implements Listener {
         removeDisplayEntities();
         getServer().getPluginManager().registerEvents(this, this);
 
+        // Teleport each tracked TextDisplay to its player's head every tick.
+        teleportTask = Bukkit.getScheduler().runTaskTimer(this, () -> {
+            for (Map.Entry<UUID, TextDisplay> entry : nameTags.entrySet()) {
+                Player player = Bukkit.getPlayer(entry.getKey());
+                TextDisplay display = entry.getValue();
+                if (player != null && player.isOnline() && display != null && !display.isDead()) {
+                    Location target = player.getLocation().clone().add(0, player.getHeight() + 0.35, 0);
+                    display.teleport(target);
+                }
+            }
+        }, 0L, 1L);
+
         for (Player player : Bukkit.getOnlinePlayers()) {
             applyStoredName(player);
         }
@@ -51,6 +72,11 @@ public final class Burn extends JavaPlugin implements Listener {
 
     @Override
     public void onDisable() {
+        if (teleportTask != null) {
+            teleportTask.cancel();
+            teleportTask = null;
+        }
+
         for (Player player : Bukkit.getOnlinePlayers()) {
             removeNameTag(player);
             if (hiddenNameTeam != null) {
@@ -61,6 +87,8 @@ public final class Burn extends JavaPlugin implements Listener {
         if (hiddenNameTeam != null && hiddenNameTeam.getEntries().isEmpty()) {
             hiddenNameTeam.unregister();
         }
+
+        nameTags.clear();
     }
 
     private void applyStoredName(Player player) {
@@ -78,11 +106,11 @@ public final class Burn extends JavaPlugin implements Listener {
         hiddenNameTeam.addEntry(player.getName());
         removeNameTag(player);
 
-        Location location = player.getLocation().clone().add(0, player.getHeight() + 0.35, 0);
+        Location location = player.getLocation().clone().add(0, player.getHeight() + 0.6, 0);
         TextDisplay text = player.getWorld().spawn(location, TextDisplay.class, entity -> {
             entity.addScoreboardTag(DISPLAY_TAG);
             entity.text(toComponent(display));
-            entity.setBillboard(TextDisplay.Billboard.CENTER);
+            entity.setBillboard(TextDisplay.Billboard.VERTICAL);
             entity.setAlignment(TextDisplay.TextAlignment.CENTER);
             entity.setDefaultBackground(false);
             entity.setShadowed(true);
@@ -94,15 +122,22 @@ public final class Burn extends JavaPlugin implements Listener {
             entity.setPersistent(false);
         });
 
-        player.addPassenger(text);
+        nameTags.put(player.getUniqueId(), text);
     }
 
     private void removeNameTag(Player player) {
+        // Remove any leftover passenger-based entities (cleanup from old version).
         for (Entity passenger : player.getPassengers()) {
             if (passenger.getScoreboardTags().contains(DISPLAY_TAG)) {
                 player.removePassenger(passenger);
                 passenger.remove();
             }
+        }
+
+        // Remove the tracked TextDisplay for this player.
+        TextDisplay existing = nameTags.remove(player.getUniqueId());
+        if (existing != null && !existing.isDead()) {
+            existing.remove();
         }
     }
 
@@ -135,7 +170,9 @@ public final class Burn extends JavaPlugin implements Listener {
         Player player = event.getPlayer();
         String stored = getConfig().getString("names." + player.getUniqueId());
         if (stored != null) {
-            applyStoredName(player);
+            // Delay by 1 tick — the player isn't fully in the world at join time,
+            // so spawning and tracking a TextDisplay here fails silently.
+            Bukkit.getScheduler().runTaskLater(this, () -> applyStoredName(player), 1L);
             event.setJoinMessage(stored + " §ejoined the game.");
         }
     }
