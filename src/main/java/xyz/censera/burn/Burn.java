@@ -10,7 +10,6 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.plugin.java.JavaPlugin;
-import org.bukkit.profile.PlayerProfile;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.List;
@@ -28,7 +27,9 @@ public final class Burn extends JavaPlugin implements Listener {
         player.setDisplayName(display);
         player.setPlayerListName(display);
 
-        PlayerProfile profile = Bukkit.createProfileExact(player.getUniqueId(), display.replace("§", ""));
+        com.destroystokyo.paper.profile.PlayerProfile profile =
+                (com.destroystokyo.paper.profile.PlayerProfile) player.getPlayerProfile();
+        profile.setName(display.replace("§", ""));
         player.setPlayerProfile(profile);
     }
 
@@ -36,7 +37,9 @@ public final class Burn extends JavaPlugin implements Listener {
         player.setDisplayName(player.getName());
         player.setPlayerListName(player.getName());
 
-        PlayerProfile profile = Bukkit.createProfileExact(player.getUniqueId(), player.getName());
+        com.destroystokyo.paper.profile.PlayerProfile profile =
+                (com.destroystokyo.paper.profile.PlayerProfile) player.getPlayerProfile();
+        profile.setName(player.getName());
         player.setPlayerProfile(profile);
     }
 
@@ -104,7 +107,7 @@ public final class Burn extends JavaPlugin implements Listener {
 
         String display = rest.replace("&", "§");
         String profileName = display.replaceAll("§[0-9a-fk-or]", "");
-        if (profileName.length() > 16 || !profileName.matches("[A-Za-z0-9_]*")) {
+        if (profileName.length() > 16 || !profileName.matches("[A-Za-z0-9_]+")) {
             sender.sendMessage("§7Display name must be 1-16 characters using letters, numbers, or underscores.");
             return true;
         }
