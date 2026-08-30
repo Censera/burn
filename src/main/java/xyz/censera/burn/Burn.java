@@ -123,6 +123,8 @@ public final class Burn extends JavaPlugin implements Listener {
         });
 
         nameTags.put(player.getUniqueId(), text);
+        text.setVisibleByDefault(true);
+        player.hideEntity(this, text);
     }
 
     private void removeNameTag(Player player) {
