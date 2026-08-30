@@ -23,13 +23,32 @@ public final class Burn extends JavaPlugin implements Listener {
         getServer().getPluginManager().registerEvents(this, this);
     }
 
+    private void applyName(Player player, String display) {
+        player.setDisplayName(display);
+        player.setPlayerListName(display);
+
+        com.destroystokyo.paper.profile.PlayerProfile profile =
+                (com.destroystokyo.paper.profile.PlayerProfile) player.getPlayerProfile();
+        profile.setName(display.replace("§", ""));
+        player.setPlayerProfile(profile);
+    }
+
+    private void resetName(Player player) {
+        player.setDisplayName(player.getName());
+        player.setPlayerListName(player.getName());
+
+        com.destroystokyo.paper.profile.PlayerProfile profile =
+                (com.destroystokyo.paper.profile.PlayerProfile) player.getPlayerProfile();
+        profile.setName(player.getName());
+        player.setPlayerProfile(profile);
+    }
+
     @EventHandler(priority = EventPriority.LOWEST)
     public void onJoin(PlayerJoinEvent event) {
         Player player = event.getPlayer();
         String stored = getConfig().getString("names." + player.getUniqueId());
         if (stored != null) {
-            player.setDisplayName(stored);
-            player.setPlayerListName(stored);
+            applyName(player, stored);
             event.setJoinMessage(stored + " §ejoined the game.");
         }
     }
@@ -80,20 +99,24 @@ public final class Burn extends JavaPlugin implements Listener {
             getConfig().set("names." + uuid, null);
             saveConfig();
             if (target != null) {
-                target.setDisplayName(target.getName());
-                target.setPlayerListName(target.getName());
+                resetName(target);
             }
             sender.sendMessage("§7Reset.");
             return true;
         }
 
         String display = rest.replace("&", "§");
+        String profileName = display.replaceAll("§[0-9a-fk-or]", "");
+        if (profileName.length() > 16 || !profileName.matches("[A-Za-z0-9_]+")) {
+            sender.sendMessage("§7Display name must be 1-16 characters using letters, numbers, or underscores.");
+            return true;
+        }
+
         getConfig().set("names." + uuid, display);
         saveConfig();
 
         if (target != null) {
-            target.setDisplayName(display);
-            target.setPlayerListName(display);
+            applyName(target, display);
         }
 
         sender.sendMessage("§7Done.");
