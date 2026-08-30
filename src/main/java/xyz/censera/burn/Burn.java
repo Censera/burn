@@ -1,15 +1,22 @@
 package xyz.censera.burn;
 
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
 import org.bukkit.Bukkit;
+import org.bukkit.Location;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandSender;
+import org.bukkit.entity.Entity;
 import org.bukkit.entity.Player;
+import org.bukkit.entity.TextDisplay;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.plugin.java.JavaPlugin;
+import org.bukkit.scoreboard.Scoreboard;
+import org.bukkit.scoreboard.Team;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.List;
@@ -17,30 +24,110 @@ import java.util.UUID;
 
 public final class Burn extends JavaPlugin implements Listener {
 
+    private static final String TEAM_NAME = "burn_hidden";
+    private static final String DISPLAY_TAG = "burn_nametag";
+
+    private Scoreboard scoreboard;
+    private Team hiddenNameTeam;
+
     @Override
     public void onEnable() {
         saveDefaultConfig();
+
+        scoreboard = Bukkit.getScoreboardManager().getMainScoreboard();
+        hiddenNameTeam = scoreboard.getTeam(TEAM_NAME);
+        if (hiddenNameTeam == null) {
+            hiddenNameTeam = scoreboard.registerNewTeam(TEAM_NAME);
+        }
+        hiddenNameTeam.setOption(Team.Option.NAME_TAG_VISIBILITY, Team.OptionStatus.NEVER);
+
+        removeDisplayEntities();
         getServer().getPluginManager().registerEvents(this, this);
+
+        for (Player player : Bukkit.getOnlinePlayers()) {
+            applyStoredName(player);
+        }
     }
 
-    private void applyName(Player player, String display) {
-        player.setDisplayName(display);
-        player.setPlayerListName(display);
+    @Override
+    public void onDisable() {
+        for (Player player : Bukkit.getOnlinePlayers()) {
+            removeNameTag(player);
+            if (hiddenNameTeam != null) {
+                hiddenNameTeam.removeEntry(player.getName());
+            }
+        }
 
-        com.destroystokyo.paper.profile.PlayerProfile profile =
-                (com.destroystokyo.paper.profile.PlayerProfile) player.getPlayerProfile();
-        profile.setName(display.replace("§", ""));
-        player.setPlayerProfile(profile);
+        if (hiddenNameTeam != null && hiddenNameTeam.getEntries().isEmpty()) {
+            hiddenNameTeam.unregister();
+        }
+    }
+
+    private void applyStoredName(Player player) {
+        String stored = getConfig().getString("names." + player.getUniqueId());
+        if (stored == null) {
+            return;
+        }
+
+        player.setDisplayName(stored);
+        player.setPlayerListName(stored);
+        setNameTag(player, stored);
+    }
+
+    private void setNameTag(Player player, String display) {
+        hiddenNameTeam.addEntry(player.getName());
+        removeNameTag(player);
+
+        Location location = player.getLocation().clone().add(0, player.getHeight() + 0.35, 0);
+        TextDisplay text = player.getWorld().spawn(location, TextDisplay.class, entity -> {
+            entity.addScoreboardTag(DISPLAY_TAG);
+            entity.text(toComponent(display));
+            entity.setBillboard(TextDisplay.Billboard.CENTER);
+            entity.setAlignment(TextDisplay.TextAlignment.CENTER);
+            entity.setDefaultBackground(false);
+            entity.setShadowed(true);
+            entity.setSeeThrough(false);
+            entity.setLineWidth(256);
+            entity.setViewRange(64.0f);
+            entity.setInterpolationDuration(0);
+            entity.setTeleportDuration(0);
+            entity.setPersistent(false);
+        });
+
+        player.addPassenger(text);
+    }
+
+    private void removeNameTag(Player player) {
+        for (Entity passenger : player.getPassengers()) {
+            if (passenger.getScoreboardTags().contains(DISPLAY_TAG)) {
+                player.removePassenger(passenger);
+                passenger.remove();
+            }
+        }
     }
 
     private void resetName(Player player) {
         player.setDisplayName(player.getName());
         player.setPlayerListName(player.getName());
+        removeNameTag(player);
 
-        com.destroystokyo.paper.profile.PlayerProfile profile =
-                (com.destroystokyo.paper.profile.PlayerProfile) player.getPlayerProfile();
-        profile.setName(player.getName());
-        player.setPlayerProfile(profile);
+        if (hiddenNameTeam != null) {
+            hiddenNameTeam.removeEntry(player.getName());
+        }
+    }
+
+    private Component toComponent(String text) {
+        return LegacyComponentSerializer.legacySection().deserialize(text);
+    }
+
+    private void removeDisplayEntities() {
+        for (var world : Bukkit.getWorlds()) {
+            for (TextDisplay display : world.getEntitiesByClass(TextDisplay.class)) {
+                if (display.getScoreboardTags().contains(DISPLAY_TAG)) {
+                    display.remove();
+                }
+            }
+        }
     }
 
     @EventHandler(priority = EventPriority.LOWEST)
@@ -48,7 +135,7 @@ public final class Burn extends JavaPlugin implements Listener {
         Player player = event.getPlayer();
         String stored = getConfig().getString("names." + player.getUniqueId());
         if (stored != null) {
-            applyName(player, stored);
+            applyStoredName(player);
             event.setJoinMessage(stored + " §ejoined the game.");
         }
     }
@@ -59,6 +146,10 @@ public final class Burn extends JavaPlugin implements Listener {
         String stored = getConfig().getString("names." + player.getUniqueId());
         if (stored != null) {
             event.setQuitMessage(stored + " §eleft the game.");
+        }
+        removeNameTag(player);
+        if (hiddenNameTeam != null) {
+            hiddenNameTeam.removeEntry(player.getName());
         }
     }
 
@@ -106,17 +197,11 @@ public final class Burn extends JavaPlugin implements Listener {
         }
 
         String display = rest.replace("&", "§");
-        String profileName = display.replaceAll("§[0-9a-fk-or]", "");
-        if (profileName.length() > 16 || !profileName.matches("[A-Za-z0-9_]+")) {
-            sender.sendMessage("§7Display name must be 1-16 characters using letters, numbers, or underscores.");
-            return true;
-        }
-
         getConfig().set("names." + uuid, display);
         saveConfig();
 
         if (target != null) {
-            applyName(target, display);
+            applyStoredName(target);
         }
 
         sender.sendMessage("§7Done.");
